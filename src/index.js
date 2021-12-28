@@ -10,31 +10,36 @@ app.use(express.json());
 const users = [];
 
 function checksExistsUserAccount(request, response, next) {
-  const { username: usernameHeaders } = request.headers;
-  const { username: usernameBody } = request.body;
+  const { username } = request.headers;
 
-  let userExists = false;
+  let userExists = undefined;
 
-  if (usernameHeaders && !usernameBody) {
-    userExists = users.find(user => user.username === usernameHeaders);
-  } else if (usernameBody && !usernameHeaders) {
-    userExists = users.find(user => user.username === usernameBody);
+  if (username) {
+    userExists = users.find(user => user.username === username);
+  }
+
+  if (!userExists) {
+    return response.status(404).json({ error: "User not found" });
   } else {
-    userExists = users.find(user => user.username === usernameHeaders);
+    request.user = userExists;
   }
-
-  if (userExists) {
-    request.userExists = userExists;
-  }
-
+  
   next();
 }
 
-// Cria um novo usuário - username passado pelo body
-app.post('/users', checksExistsUserAccount, (request, response) => {
+app.post('/users', (request, response) => {
   const { name, username } = request.body;
-  const { userExists } = request;
 
+  const usersExists = users.some(user => user.username === username);
+
+  if (usersExists) {
+    return response.status(400).json({ error: "User already exists" });
+  }
+
+  if (!name || !username) {
+    return response.status(400).json({ error: "Name or username must be filled" });
+  }
+  
   const userModel = {
     id: uuidv4(),
     name,
@@ -42,29 +47,20 @@ app.post('/users', checksExistsUserAccount, (request, response) => {
     todos: [],
   };
 
-  if (userExists) {
-    return response.status(400).json({ error: "User already exists" });
-  }
-
   users.push(userModel);
 
   return response.status(201).json(userModel);
 });
 
-// Visualiza todas as tarefas de um usuário - username passado pelo headers
 app.get('/todos', checksExistsUserAccount, (request, response) => {
-  const { username } = request.headers;
+  const { user } = request;
 
-  const userTodos = users.find(user => user.username === username ? user.todos : null);
-
-  return response.json(userTodos);
+  return response.json(user.todos);
 });
 
 app.post('/todos', checksExistsUserAccount, (request, response) => {
   const { title, deadline } = request.body;
-  const { username } = request.header;
-
-  const user = users.find(user => user.username === username);
+  const { user } = request;
 
   const todoModel = {
     id: uuidv4(),
@@ -76,48 +72,68 @@ app.post('/todos', checksExistsUserAccount, (request, response) => {
 
   user.todos.push(todoModel);
 
-  return response.status(201).json(user.todos);
+  return response.status(201).json(todoModel);
 });
 
 app.put('/todos/:id', checksExistsUserAccount, (request, response) => {
-  const { username } = request.headers;
-  const { title, deadline } = request.body;
-  const { id } = request.params;
+  const { id: todoId } = request.params;
+  const { title: updatedTitle, deadline: updatedDeadline } = request.body;
+  const { user } = request;
 
-  const userTodos = users.find(user => user.username === username ? user.todos : null);
-  const specificTodo = userTodos.find(todo => todo.id === id);
+  const todoFound = user.todos.find(todo => todo.id === todoId);
 
-  specificTodo = {
-    ...specificTodo,
-    title,
-    deadline
+  if (!todoFound) {
+    return response.status(404).json({ error: "Todo not found" });
+  }
+
+  const updatedTodo = {
+    ...todoFound,
+    title: updatedTitle,
+    deadline: updatedDeadline
   };
 
-  return response.json(specificTodo);
+  const filteredTodoList = user.todos.filter(todo => todo.id !== todoId);
+
+  user.todos = [...filteredTodoList, updatedTodo];
+
+  return response.json(updatedTodo);
 });
 
 app.patch('/todos/:id/done', checksExistsUserAccount, (request, response) => {
-  // Complete aqui
+  const { id: todoId } = request.params;
+  const { user } = request;
+
+  const todoFound = user.todos.find(todo => todo.id === todoId);
+
+  if (!todoFound) {
+    return response.status(404).json({ error: "Todo not found" });
+  }
+
+  const finishedTodo = {
+    ...todoFound,
+    done: true
+  };
+
+  const filteredTodoList = user.todos.filter(todo => todo.id !== todoId);
+
+  user.todos = [...filteredTodoList, finishedTodo]; 
+
+  return response.json(finishedTodo);
 });
 
 app.delete('/todos/:id', checksExistsUserAccount, (request, response) => {
-  // Complete aqui
-});
+  const { id: todoId } = request.params;
+  const { user } = request;
 
+  const todoFound = user.todos.some(todo => todo.id === todoId);
 
-/**
- * Rotas para testes
- */
-app.get('/users', (request, response) => {
-  response.json(users);
-});
+  if (!todoFound) {
+    return response.status(404).json({ error: "Todo doesn't exists" });
+  }
 
-app.get('/users/:username', (request, response) => {
-  const { username } = request.params;
+  user.todos = user.todos.filter(todo => todo.id !== todoId);
 
-  const userFound = users.find(user => user.username === username);
-
-  response.json(userFound);
+  return response.status(204).json(user.todos);
 });
 
 module.exports = app;
